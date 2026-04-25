@@ -178,14 +178,97 @@ Nginx 配置文件位于 `nginx/nginx.conf`，职责如下：
 
 > 注意：Nginx 运行在 Docker 容器内，访问宿主机服务需使用 `host.docker.internal` 而非 `localhost`。
 
-#### 日常启动顺序
+#### 启动顺序
+
+整体启动顺序如下，每步需等上一步就绪后再执行：
 
 ```
-1. 启动网关（8080）
-2. 启动 Vite：cd portal-web && pnpm dev
-3. 启动 Nginx：docker start portal-nginx（首次用 docker run，后续用 docker start）
-4. 浏览器访问 http://localhost
+1. MySQL（3306）— 数据库，基础依赖
+2. Redis（6379）— 缓存 + 会话存储
+3. Nacos（8848）— 注册中心 + 配置中心，单机模式
+4. portal-gateway（8080）— 网关，后端统一入口
+5. portal-auth（9001）— 认证授权服务
+6. portal-system（9002）— 系统管理服务
+7. portal-business（9003）— 业务服务
+8. portal-web（3000）— 前端 Vite Dev Server
+9. Nginx（80）— Docker 容器，统一入口代理
 ```
+
+> 步骤 1-3 为中间件，需确保已安装并运行。步骤 4-7 为后端服务，每启动一个需等其注册到 Nacos 后再启动下一个。
+> 步骤 8 和 9 可互换，但必须在网关之后。浏览器访问 http://localhost。
+
+**详细启动命令：**
+
+```bash
+# ===== 中间件（Docker 容器） =====
+
+# 1. MySQL
+docker start mysql
+
+# 2. Redis
+docker start redis
+
+# 3. Nacos（启动后等待端口就绪，约 10 秒）
+docker start nacos
+
+# ===== 后端服务 =====
+
+# 4. 网关（8080），需等 Nacos 就绪后再启动
+cd portal-gateway && mvn spring-boot:run
+
+# 5. 认证服务（9001），需等网关注册到 Nacos
+cd portal-auth && mvn spring-boot:run
+
+# 6. 系统管理服务（9002），需等认证服务注册到 Nacos
+cd portal-system && mvn spring-boot:run
+
+# 7. 业务服务（9003），需等系统管理服务注册到 Nacos
+cd portal-business && mvn spring-boot:run
+
+# ===== 前端 =====
+
+# 8. Vite Dev Server（3000）
+cd portal-web && pnpm dev
+
+# ===== Nginx =====
+
+# 9. Nginx（首次启动用 docker run，后续用 docker start）
+docker start portal-nginx
+# 首次：
+# docker run -d --name portal-nginx -p 80:80 \
+#   -v "$(pwd)/nginx/nginx.conf:/etc/nginx/nginx.conf:ro" nginx:stable
+```
+
+**判断服务就绪方式：**
+
+```bash
+# 检查端口是否在监听（Windows）
+netstat -ano | grep ":<端口号>" | grep LISTEN
+
+# 检查 Nacos 注册情况
+# 浏览器访问 http://localhost:8848/nacos，查看服务列表
+```
+
+#### 常见启动问题
+
+##### Q: 后端服务启动报 `Could not resolve dependencies` / `Could not find artifact com.xxx.portal:portal-common`
+
+后端各模块依赖 `portal-common`，首次启动或清理本地 Maven 仓库后需先安装公共模块：
+
+```bash
+# 在项目根目录执行
+mvn install -pl portal-common -am -DskipTests
+```
+
+安装完成后重新启动后端服务即可。
+
+##### Q: 后端服务启动报 Nacos 连接失败
+
+检查 Nacos 容器是否已启动且端口就绪（`netstat -ano | grep :8848`）。Nacos 启动后需要等待约 10 秒才能完全就绪。
+
+##### Q: 前端请求 404
+
+确认网关（8080）已启动，Nginx 容器正在运行（`docker ps --filter name=portal-nginx`）。
 
 #### 管理 Nginx 容器
 
@@ -248,7 +331,63 @@ server {
 | 登录流程 | 从上游系统带 token 跳转到门户 |
 | 接口文档 | `http://localhost:9002/swagger-ui.html`（如已配置） |
 
-## 六、常见问题
+## 六、浏览器访问流程
+
+浏览器访问 `http://localhost` 的完整请求链路如下：
+
+### 6.1 直接访问（无 token）
+
+```
+浏览器访问 http://localhost
+  → Docker Nginx（80）匹配 location /
+  → 转发到 Vite Dev Server（3000）
+  → 返回 index.html，加载 Vue 应用
+  → Vue 路由守卫检查 localStorage 中的 portal_token
+  → 无 token，重定向到 /login
+  → 显示登录页面
+```
+
+### 6.2 SSO 登录（从上游系统跳转）
+
+```
+上游系统跳转 http://localhost?token=xxx
+  → Docker Nginx（80）→ Vite（3000）→ 返回 index.html
+  → Vue 应用启动，extractTokenFromUrl() 从 URL 提取 token
+  → 将 token 存入 localStorage（key: portal_token）
+  → 清除 URL 中的 token 参数，地址栏变为干净的 URL
+  → 进入 6.3「有 token」流程
+```
+
+### 6.3 已登录（有 token）
+
+```
+浏览器访问 http://localhost（localStorage 中有 token）
+  → Docker Nginx（80）→ Vite（3000）→ 返回 index.html
+  → Vue 路由守卫检查 localStorage 中的 portal_token
+  → 有 token，调用 userStore.fetchUserInfo()
+  → 发送请求 GET /api/auth/user/info，Header 带 Authorization: <token>
+  → Nginx（80）匹配 location /api/
+  → 转发到网关 portal-gateway（8080）
+  → 网关校验 JWT token（Sa-Token）
+    → token 无效/过期 → 返回 401 → 前端清除 token，跳转 /login
+    → token 有效 → 根据路由规则转发到 portal-auth（9001）
+  → portal-auth 返回用户信息（角色、权限、菜单）
+  → 前端根据菜单动态生成路由
+  → 重定向到 /portal（门户首页）
+```
+
+### 6.4 关键节点说明
+
+| 节点 | 说明 |
+|------|------|
+| Nginx 路径分发 | `/` 转发 Vite（3000），`/api/` 转发网关（8080） |
+| host.docker.internal | Docker 容器内访问宿主机的特殊域名 |
+| token 存储 | localStorage，key 为 `portal_token` |
+| API 请求基础路径 | axios 的 baseURL 为 `/api`，自动拼接到所有接口请求前 |
+| 鉴权方式 | 请求头 `Authorization` 携带 token，网关通过 Sa-Token 校验 |
+| 动态路由 | 登录后根据用户菜单权限动态注册路由，无权限的页面不可访问 |
+
+## 七、常见问题
 
 ### Q: 服务启动报 Nacos 连接失败
 
