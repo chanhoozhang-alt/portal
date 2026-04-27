@@ -138,13 +138,91 @@
 
 ### 4.1 网关路由规则
 
-| 路径前缀 | 目标服务 | 负载均衡 |
-|----------|---------|---------|
-| `/api/auth/**` | portal-auth (9001) | `lb://portal-auth` |
-| `/api/system/**` | portal-system (9002) | `lb://portal-system` |
-| `/api/portal/**` | portal-business (9003) | `lb://portal-business` |
-| `/api/app/**` | portal-business (9003) | `lb://portal-business` |
-| `/api/category/**` | portal-business (9003) | `lb://portal-business` |
+#### 路由配置详解
+
+路由规则定义在 `portal-gateway/src/main/resources/bootstrap.yml` 中：
+
+```yaml
+spring:
+  cloud:
+    gateway:
+      routes:
+        - id: auth-service
+          uri: lb://portal-auth
+          predicates:
+            - Path=/api/auth/**
+        - id: system-service
+          uri: lb://portal-system
+          predicates:
+            - Path=/api/system/**
+        - id: business-service
+          uri: lb://portal-business
+          predicates:
+            - Path=/api/portal/**,/api/app/**,/api/category/**
+```
+
+#### 配置项说明
+
+| 配置项 | 含义 | 示例 |
+|--------|------|------|
+| `id` | 路由唯一标识 | `auth-service` |
+| `uri` | 目标服务地址 | `lb://portal-auth` |
+| `predicates` | 匹配条件（断言） | `Path=/api/auth/**` |
+| `lb://` | 负载均衡协议，通过 Nacos 服务发现获取实例 | `lb://portal-auth` 表示从 Nacos 查找 portal-auth 服务 |
+
+#### 路由规则总览
+
+| 路径前缀 | 目标服务 | 负载均衡 | 说明 |
+|----------|---------|---------|------|
+| `/api/auth/**` | portal-auth (9001) | `lb://portal-auth` | 认证授权相关接口 |
+| `/api/system/**` | portal-system (9002) | `lb://portal-system` | 系统管理相关接口 |
+| `/api/portal/**` | portal-business (9003) | `lb://portal-business` | 门户首页接口 |
+| `/api/app/**` | portal-business (9003) | `lb://portal-business` | 应用管理接口 |
+| `/api/category/**` | portal-business (9003) | `lb://portal-business` | 分类管理接口 |
+
+#### 路由匹配流程
+
+```
+请求到达网关（8080）
+  ↓
+AuthGlobalFilter 先执行（order=-1，优先级最高）
+  ↓ JWT 认证处理（见 4.2 白名单）
+  ↓
+Gateway 路由引擎按顺序匹配 predicates
+  ↓
+请求路径 /api/auth/verify  → 匹配 Path=/api/auth/**  → 转发到 portal-auth
+请求路径 /api/system/users → 匹配 Path=/api/system/** → 转发到 portal-system
+请求路径 /api/app/list     → 匹配 Path=/api/app/**   → 转发到 portal-business
+请求路径 /xxx              → 无匹配                  → 返回 404
+```
+
+#### lb:// 负载均衡说明
+
+`lb://` 是 Spring Cloud Gateway 的负载均衡协议前缀：
+
+```
+lb://portal-auth
+ │     │
+ │     └── 服务名称，从 Nacos 服务列表查找可用实例
+ └── LoadBalancer 协议标识
+```
+
+- 当 portal-auth 部署了多个实例（如 9001、9011）时，Gateway 自动通过负载均衡策略选择一个实例转发
+- 如果只有一个实例，直接转发到该实例
+- 如果实例不可用（未注册到 Nacos），返回 503 Service Unavailable
+
+#### 如何新增路由
+
+当新增微服务时，在 `bootstrap.yml` 的 `routes` 下添加路由规则即可：
+
+```yaml
+- id: report-service                    # 路由标识，唯一
+  uri: lb://portal-report               # 目标服务名称
+  predicates:
+    - Path=/api/report/**               # 匹配路径
+```
+
+添加后重启网关服务生效。
 
 ### 4.2 网关白名单
 

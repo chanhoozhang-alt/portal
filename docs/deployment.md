@@ -321,7 +321,140 @@ server {
 }
 ```
 
-## 五、验证
+## 五、Nginx 的作用详解
+
+### 5.1 为什么需要 Nginx
+
+本项目是前后端分离架构，浏览器同时需要获取**页面**和**接口数据**，这两类请求由不同的服务处理：
+
+| 请求类型 | 处理方 | 说明 |
+|----------|--------|------|
+| 页面请求 `/` | 前端（静态文件） | HTML/JS/CSS，无需后端计算 |
+| 接口请求 `/api/**` | 后端（网关 → 微服务） | 动态数据查询 |
+
+如果没有 Nginx，浏览器需要分别访问不同端口，存在跨域问题，且用户需要记住多个地址。
+
+Nginx 作为**统一入口**，根据请求路径分发到不同服务，浏览器只需访问一个地址。
+
+### 5.2 Nginx 在架构中的位置
+
+```
+浏览器
+  ↓ 所有请求都发到 Nginx
+Nginx（统一入口，80 端口）
+  │
+  ├── 页面请求 /          → 前端静态文件（HTML/JS/CSS）
+  │
+  └── 接口请求 /api/**    → 网关（8080） → 各微服务 → 数据库
+```
+
+### 5.3 浏览器访问完整流程
+
+#### 访问页面（GET /）
+
+```
+浏览器请求 GET /
+  ↓
+Nginx 收到请求，匹配 location / 规则
+  ↓
+返回 dist/index.html 给浏览器
+  ↓
+浏览器解析 HTML，发现引用了 JS/CSS 文件
+  ↓
+浏览器再次请求 /assets/index-abc123.js、/assets/index-def456.css
+  ↓
+Nginx 匹配 location / 规则，返回对应静态文件
+  ↓
+浏览器执行 JS，Vue 应用启动，Vue Router 渲染页面
+```
+
+#### 调用接口（GET /api/system/users/page）
+
+```
+JS 代码调用 axios.get('/api/system/users/page')
+  ↓
+浏览器发出 HTTP 请求到 Nginx
+  ↓
+Nginx 匹配 location /api/ 规则，转发到网关（8080）
+  ↓
+网关认证 + 路由 → 微服务 → 数据库
+  ↓
+响应 JSON 返回浏览器
+  ↓
+JS 拿到数据渲染页面
+```
+
+### 5.4 开发环境 vs 生产环境
+
+#### 开发环境
+
+```
+浏览器 → Nginx(:80) → 页面请求 /   → Vite Dev Server(:3000)
+                      → API请求 /api/ → 网关(:8080)
+```
+
+- Nginx 通过 Docker 运行
+- 页面请求转发到 Vite Dev Server，支持热更新
+- API 请求转发到网关，与生产环境链路一致
+
+#### 生产环境
+
+```
+浏览器 → Nginx(:80) → 页面请求 /   → 直接返回 dist/ 静态文件
+                      → API请求 /api/ → 网关(:8080)
+```
+
+- Nginx 直接托管打包后的静态文件，无需 Vite/Node.js 进程
+- 静态文件由 `pnpm build` 生成，放在 `dist/` 目录
+
+#### 关键区别
+
+| 对比项 | 开发环境 | 生产环境 |
+|--------|----------|----------|
+| 页面服务 | Vite Dev Server（实时编译） | Nginx 直接返回静态文件 |
+| 热更新 | 支持 | 不支持 |
+| 需要 Node.js | 是（Vite 运行需要） | 否 |
+| 性能 | 低（实时编译） | 高（直接返回文件） |
+| Nginx 运行方式 | Docker 容器 | 直接安装或 Docker |
+
+### 5.5 生产环境 Nginx 的额外能力
+
+| 能力 | 说明 | 配置示例 |
+|------|------|----------|
+| SSL 终结 | HTTPS 证书配在 Nginx，后端不用管 | `listen 443 ssl;` |
+| Gzip 压缩 | 压缩 JS/CSS，减少传输体积 | `gzip on; gzip_types text/css application/javascript;` |
+| 静态资源缓存 | 浏览器缓存 JS/CSS，减少重复请求 | `expires 30d;` |
+| 负载均衡 | 多个网关实例时分发请求 | `upstream gateway { server 8080; server 8081; }` |
+| 安全 | 隐藏后端真实地址和端口 | 通过 `proxy_pass` 转发 |
+
+### 5.6 如果不搞 Nginx 怎么办
+
+有几种替代方案，但各有不足：
+
+**方案一：Vite 代理（仅开发环境）**
+
+```js
+// vite.config.js
+server: {
+  proxy: {
+    '/api': { target: 'http://localhost:8080' }
+  }
+}
+```
+
+浏览器访问 `localhost:3000`，Vite 同时提供页面和代理接口。但仅适用于开发环境，生产环境不能用 Vite。
+
+**方案二：网关托管静态文件**
+
+把打包后的 `dist` 放到网关服务中，网关同时处理页面和接口。但会让网关职责变重，违背单一职责原则。
+
+**方案三：前后端分域名 + CORS**
+
+前端 `portal.xxx.com`，接口 `api.xxx.com`，通过跨域配置解决。但跨域配置复杂，且多了一个域名。
+
+**结论**：生产环境建议使用 Nginx，是前后端分离项目的标准做法。
+
+## 六、验证
 
 | 验证项 | 方式 |
 |--------|------|
@@ -331,11 +464,11 @@ server {
 | 登录流程 | 从上游系统带 token 跳转到门户 |
 | 接口文档 | `http://localhost:9002/swagger-ui.html`（如已配置） |
 
-## 六、浏览器访问流程
+## 七、浏览器访问流程
 
 浏览器访问 `http://localhost` 的完整请求链路如下：
 
-### 6.1 直接访问（无 token）
+### 7.1 直接访问（无 token）
 
 ```
 浏览器访问 http://localhost
@@ -347,7 +480,7 @@ server {
   → 显示登录页面
 ```
 
-### 6.2 SSO 登录（从上游系统跳转）
+### 7.2 SSO 登录（从上游系统跳转）
 
 ```
 上游系统跳转 http://localhost?token=xxx
@@ -355,10 +488,10 @@ server {
   → Vue 应用启动，extractTokenFromUrl() 从 URL 提取 token
   → 将 token 存入 localStorage（key: portal_token）
   → 清除 URL 中的 token 参数，地址栏变为干净的 URL
-  → 进入 6.3「有 token」流程
+  → 进入 7.3「有 token」流程
 ```
 
-### 6.3 已登录（有 token）
+### 7.3 已登录（有 token）
 
 ```
 浏览器访问 http://localhost（localStorage 中有 token）
@@ -376,7 +509,7 @@ server {
   → 重定向到 /portal（门户首页）
 ```
 
-### 6.4 关键节点说明
+### 7.4 关键节点说明
 
 | 节点 | 说明 |
 |------|------|
@@ -387,7 +520,7 @@ server {
 | 鉴权方式 | 请求头 `Authorization` 携带 token，网关通过 Sa-Token 校验 |
 | 动态路由 | 登录后根据用户菜单权限动态注册路由，无权限的页面不可访问 |
 
-## 七、常见问题
+## 八、常见问题
 
 ### Q: 服务启动报 Nacos 连接失败
 

@@ -7,8 +7,11 @@ import com.xxx.portal.common.vo.UserInfoVO;
 import com.xxx.portal.common.vo.SysUserVO;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
+
+import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.TypeReference;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -26,7 +29,7 @@ public class PermissionService {
     private SystemFeignClient systemFeignClient;
 
     @Autowired
-    private StringRedisTemplate redisTemplate;
+    private RedisTemplate<String, Object> redisTemplate;
 
     private static final String PERM_CACHE_PREFIX = "perm:";
     private static final String MENU_CACHE_PREFIX = "menu:";
@@ -57,9 +60,25 @@ public class PermissionService {
         String cacheKey = MENU_CACHE_PREFIX + userId;
 
         // 查缓存
-        // 先走 Feign 查数据库（缓存后续优化）
+        try {
+            Object cached = redisTemplate.opsForValue().get(cacheKey);
+            if (cached != null) {
+                return JSON.parseObject(JSON.toJSONString(cached), new TypeReference<List<MenuVO>>() {});
+            }
+        } catch (Exception e) {
+            log.warn("读取菜单缓存失败", e);
+        }
+
+        // 查数据库
         R<List<MenuVO>> result = systemFeignClient.getMenuTree(userId);
         if (result != null && result.getData() != null) {
+            // 写入缓存
+            try {
+                redisTemplate.opsForValue().set(cacheKey,
+                    result.getData(), CACHE_TTL_HOURS, TimeUnit.HOURS);
+            } catch (Exception e) {
+                log.warn("缓存菜单数据失败", e);
+            }
             return result.getData();
         }
         return new ArrayList<>();
@@ -73,14 +92,22 @@ public class PermissionService {
         String cacheKey = PERM_CACHE_PREFIX + userId;
 
         // 查缓存
-        String cached = redisTemplate.opsForValue().get(cacheKey);
-        // 简化：直接走 Feign
+        try {
+            Object cached = redisTemplate.opsForValue().get(cacheKey);
+            if (cached != null) {
+                return (List<String>) cached;
+            }
+        } catch (Exception e) {
+            log.warn("读取权限缓存失败", e);
+        }
+
+        // 查数据库
         R<List<String>> result = systemFeignClient.getPermissions(userId);
         if (result != null && result.getData() != null) {
             // 写入缓存
             try {
                 redisTemplate.opsForValue().set(cacheKey,
-                    String.join(",", result.getData()), CACHE_TTL_HOURS, TimeUnit.HOURS);
+                    result.getData(), CACHE_TTL_HOURS, TimeUnit.HOURS);
             } catch (Exception e) {
                 log.warn("缓存权限数据失败", e);
             }

@@ -31,6 +31,7 @@
         <mybatis-plus.version>3.5.5</mybatis-plus.version>
         <sa-token.version>1.38.0</sa-token.version>
         <springdoc.version>1.7.0</springdoc.version>
+        <fastjson2.version>2.0.47</fastjson2.version>
         <!-- 覆盖 Spring Boot 默认的 jackson 版本，修复安全漏洞 -->
         <jackson-bom.version>2.15.4</jackson-bom.version>
     </properties>
@@ -94,6 +95,12 @@
                 <groupId>org.springdoc</groupId>
                 <artifactId>springdoc-openapi-ui</artifactId>
                 <version>${springdoc.version}</version>
+            </dependency>
+            <!-- Fastjson2 -->
+            <dependency>
+                <groupId>com.alibaba.fastjson2</groupId>
+                <artifactId>fastjson2</artifactId>
+                <version>${fastjson2.version}</version>
             </dependency>
             <!-- MySQL -->
             <dependency>
