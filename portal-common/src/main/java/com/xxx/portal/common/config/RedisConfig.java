@@ -1,6 +1,8 @@
 package com.xxx.portal.common.config;
 
 import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.JSONReader;
+import com.alibaba.fastjson2.JSONWriter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
@@ -33,6 +35,9 @@ public class RedisConfig {
 
     static class Fastjson2RedisSerializer<T> implements RedisSerializer<T> {
 
+        private static final JSONReader.AutoTypeBeforeHandler AUTO_TYPE_FILTER =
+                JSONReader.autoTypeFilter("com.xxx.portal.");
+
         private final Class<T> clazz;
 
         Fastjson2RedisSerializer(Class<T> clazz) {
@@ -44,7 +49,7 @@ public class RedisConfig {
             if (t == null) {
                 return new byte[0];
             }
-            return JSON.toJSONBytes(t);
+            return JSON.toJSONBytes(t, JSONWriter.Feature.WriteClassName);
         }
 
         @Override
@@ -52,7 +57,8 @@ public class RedisConfig {
             if (bytes == null || bytes.length == 0) {
                 return null;
             }
-            return JSON.parseObject(bytes, clazz);
+            return (T) JSON.parseObject(bytes, clazz, AUTO_TYPE_FILTER,
+                    JSONReader.Feature.SupportAutoType);
         }
     }
 }

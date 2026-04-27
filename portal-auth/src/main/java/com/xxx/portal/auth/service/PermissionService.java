@@ -7,15 +7,13 @@ import com.xxx.portal.common.vo.UserInfoVO;
 import com.xxx.portal.common.vo.SysUserVO;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.Cursor;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.stereotype.Service;
-
-import com.alibaba.fastjson2.JSON;
-import com.alibaba.fastjson2.TypeReference;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -63,7 +61,7 @@ public class PermissionService {
         try {
             Object cached = redisTemplate.opsForValue().get(cacheKey);
             if (cached != null) {
-                return JSON.parseObject(JSON.toJSONString(cached), new TypeReference<List<MenuVO>>() {});
+                return (List<MenuVO>) cached;
             }
         } catch (Exception e) {
             log.warn("读取菜单缓存失败", e);
@@ -121,14 +119,21 @@ public class PermissionService {
      */
     public void refreshCache() {
         log.info("收到刷新权限缓存通知");
-        // 清理所有权限缓存
-        Set<String> keys = redisTemplate.keys(PERM_CACHE_PREFIX + "*");
-        if (keys != null && !keys.isEmpty()) {
-            redisTemplate.delete(keys);
-        }
-        Set<String> menuKeys = redisTemplate.keys(MENU_CACHE_PREFIX + "*");
-        if (menuKeys != null && !menuKeys.isEmpty()) {
-            redisTemplate.delete(menuKeys);
+        scanAndDelete(PERM_CACHE_PREFIX + "*");
+        scanAndDelete(MENU_CACHE_PREFIX + "*");
+    }
+
+    @SuppressWarnings("unchecked")
+    private void scanAndDelete(String pattern) {
+        try (Cursor<String> cursor = (Cursor<String>) redisTemplate.scan(
+                ScanOptions.scanOptions().match(pattern).count(100).build())) {
+            List<String> keys = new ArrayList<>();
+            cursor.forEachRemaining(key -> keys.add((String) key));
+            if (!keys.isEmpty()) {
+                redisTemplate.delete(keys);
+            }
+        } catch (Exception e) {
+            log.warn("扫描删除缓存失败, pattern={}", pattern, e);
         }
     }
 }

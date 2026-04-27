@@ -4,11 +4,14 @@ import com.xxx.portal.common.feign.AuthFeignClient;
 import com.xxx.portal.system.service.DataSyncService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.Cursor;
+import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-import java.util.Set;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * 数据同步定时调度
@@ -48,21 +51,28 @@ public class DataSyncScheduler {
     }
 
     private void afterSync() {
-        // 清理 Redis 权限缓存
-        try {
-            Set<String> keys = redisTemplate.keys("perm:*");
-            if (keys != null && !keys.isEmpty()) {
-                redisTemplate.delete(keys);
-            }
-        } catch (Exception e) {
-            log.warn("清理权限缓存失败", e);
-        }
+        // 清理 Redis 权限缓存（使用 SCAN 避免 KEYS 阻塞）
+        scanAndDelete("perm:*");
+        scanAndDelete("menu:*");
 
         // 通知 auth-svc 刷新缓存
         try {
             authFeignClient.refreshPermissionCache();
         } catch (Exception e) {
             log.warn("通知 auth-svc 刷新缓存失败", e);
+        }
+    }
+
+    private void scanAndDelete(String pattern) {
+        try (Cursor<String> cursor = redisTemplate.scan(
+                ScanOptions.scanOptions().match(pattern).count(100).build())) {
+            List<String> keys = new ArrayList<>();
+            cursor.forEachRemaining(keys::add);
+            if (!keys.isEmpty()) {
+                redisTemplate.delete(keys);
+            }
+        } catch (Exception e) {
+            log.warn("扫描删除缓存失败, pattern={}", pattern, e);
         }
     }
 }
