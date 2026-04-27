@@ -52,12 +52,7 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
     }
 
     private boolean isWhiteListed(String path) {
-        for (String prefix : WHITE_LIST) {
-            if (path.startsWith(prefix)) {
-                return true;
-            }
-        }
-        return false;
+        return WHITE_LIST.contains(path);
     }
 
     @Override

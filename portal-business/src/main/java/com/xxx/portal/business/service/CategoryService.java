@@ -2,7 +2,9 @@ package com.xxx.portal.business.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.xxx.portal.common.exception.BusinessException;
+import com.xxx.portal.common.model.PortalApp;
 import com.xxx.portal.common.model.PortalCategory;
+import com.xxx.portal.business.mapper.PortalAppMapper;
 import com.xxx.portal.business.mapper.PortalCategoryMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -18,6 +20,9 @@ public class CategoryService {
 
     @Autowired
     private PortalCategoryMapper categoryMapper;
+
+    @Autowired
+    private PortalAppMapper appMapper;
 
     /**
      * 查询所有启用的分类
@@ -52,6 +57,11 @@ public class CategoryService {
 
     @Transactional(rollbackFor = Exception.class)
     public void delete(Long id) {
+        Long count = appMapper.selectCount(new LambdaQueryWrapper<PortalApp>()
+                .eq(PortalApp::getCategoryId, id));
+        if (count > 0) {
+            throw new BusinessException("该分类下存在应用，不能删除");
+        }
         categoryMapper.deleteById(id);
     }
 }

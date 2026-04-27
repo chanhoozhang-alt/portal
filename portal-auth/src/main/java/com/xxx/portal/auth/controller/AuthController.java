@@ -2,6 +2,7 @@ package com.xxx.portal.auth.controller;
 
 import com.xxx.portal.common.result.R;
 import com.xxx.portal.common.vo.LoginVO;
+import com.xxx.portal.common.vo.MenuVO;
 import com.xxx.portal.common.vo.UserInfoVO;
 import com.xxx.portal.auth.service.AuthService;
 import com.xxx.portal.auth.service.PermissionService;
@@ -57,7 +58,7 @@ public class AuthController {
      * 获取当前用户菜单树
      */
     @GetMapping("/menus")
-    public R<List<?>> getMenuTree() {
+    public R<List<MenuVO>> getMenuTree() {
         Long userId = StpUtil.getLoginIdAsLong();
         return R.ok(permissionService.getMenuTree(userId));
     }

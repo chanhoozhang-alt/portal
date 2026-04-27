@@ -44,8 +44,6 @@ public class UserController {
             @RequestParam(required = false) String realName,
             @RequestParam(required = false) String empNo,
             @RequestParam(required = false) Integer status) {
-        Page<?> page = new Page<>(pageNum, pageSize);
-        // 简化：直接返回实体分页
         return R.ok(userService.page(new Page<>(pageNum, pageSize), realName, empNo, status));
     }
 

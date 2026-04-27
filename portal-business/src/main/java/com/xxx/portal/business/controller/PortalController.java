@@ -13,7 +13,6 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 /**
  * 门户首页控制器
@@ -36,15 +35,11 @@ public class PortalController {
         List<PortalCategory> categories = categoryService.listEnabled();
         List<PortalApp> apps = appService.listEnabled();
 
-        // 按分类分组
-        Map<Long, String> categoryNameMap = categories.stream()
-                .collect(Collectors.toMap(PortalCategory::getId, PortalCategory::getCategoryName));
-
         Map<String, List<PortalApp>> result = new LinkedHashMap<>();
         for (PortalCategory category : categories) {
             List<PortalApp> categoryApps = apps.stream()
                     .filter(app -> category.getId().equals(app.getCategoryId()))
-                    .collect(Collectors.toList());
+                    .collect(java.util.stream.Collectors.toList());
             result.put(category.getCategoryName(), categoryApps);
         }
         return R.ok(result);

@@ -74,31 +74,27 @@ public class MenuService {
         List<Long> menuIds = roleMenus.stream().map(SysRoleMenu::getMenuId).distinct().collect(Collectors.toList());
         List<SysMenu> menus = menuMapper.selectBatchIds(menuIds);
 
-        // 补充所有父级菜单，确保树结构完整
+        // 补充所有父级菜单，确保树结构完整（批量逐层查询，避免 N+1）
         java.util.Set<Long> allIds = new java.util.HashSet<>(menuIds);
+        java.util.Set<Long> needLookup = new java.util.HashSet<>();
         for (SysMenu menu : menus) {
-            addParentIds(menu.getParentId(), allIds);
+            if (menu.getParentId() != null && menu.getParentId() != 0 && !allIds.contains(menu.getParentId())) {
+                needLookup.add(menu.getParentId());
+            }
         }
-        if (allIds.size() > menuIds.size()) {
-            allIds.removeAll(menuIds);
-            menus.addAll(menuMapper.selectBatchIds(allIds));
+        while (!needLookup.isEmpty()) {
+            List<SysMenu> parents = menuMapper.selectBatchIds(needLookup);
+            allIds.addAll(needLookup);
+            needLookup.clear();
+            for (SysMenu parent : parents) {
+                if (parent.getParentId() != null && parent.getParentId() != 0 && !allIds.contains(parent.getParentId())) {
+                    needLookup.add(parent.getParentId());
+                }
+            }
+            menus.addAll(parents);
         }
 
         return buildTree(menus);
-    }
-
-    /**
-     * 递归补充父菜单 ID
-     */
-    private void addParentIds(Long parentId, java.util.Set<Long> allIds) {
-        if (parentId == null || parentId == 0 || allIds.contains(parentId)) {
-            return;
-        }
-        allIds.add(parentId);
-        SysMenu parent = menuMapper.selectById(parentId);
-        if (parent != null) {
-            addParentIds(parent.getParentId(), allIds);
-        }
     }
 
     public SysMenu getById(Long id) {

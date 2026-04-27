@@ -67,6 +67,7 @@ public class AuthService {
 
         // Sa-Token 建立会话
         StpUtil.login(user.getId());
+        StpUtil.getSession().set("realName", user.getRealName());
 
         // 查询权限菜单
         UserInfoVO userInfo = permissionService.getUserInfo(user.getId());

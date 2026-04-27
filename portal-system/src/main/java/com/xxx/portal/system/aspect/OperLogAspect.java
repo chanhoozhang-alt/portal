@@ -38,7 +38,9 @@ public class OperLogAspect {
 
         try {
             operationLog.setUserId(StpUtil.getLoginIdAsLong());
-            operationLog.setUsername(StpUtil.getLoginIdAsString());
+            cn.dev33.satoken.session.SaSession session = StpUtil.getSession(false);
+            String realName = session != null ? (String) session.get("realName") : null;
+            operationLog.setUsername(realName != null ? realName : StpUtil.getLoginIdAsString());
         } catch (Exception e) {
             // 未登录的情况
         }
